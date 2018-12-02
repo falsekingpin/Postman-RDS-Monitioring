@@ -1,4 +1,11 @@
+# -*- coding: utf-8 -*-
+__author__ = "Akshay Nar"
+
 class Constants:
+    """
+    This class is used for setting constants and common queries
+    """
+    #Setting constants
     DB_INSTANCES = 'DBInstances'
     ALLOCATED_STORAGE = 'AllocatedStorage'
     STORAGE = 'storage'

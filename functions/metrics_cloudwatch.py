@@ -1,3 +1,7 @@
+# -*- coding: utf-8 -*-
+__author__ = "Akshay Nar"
+
+#Importing dependencies
 import boto3
 import pymysql
 import logging
@@ -21,6 +25,7 @@ class CloudWatchOps:
     #Setting the threshold of logger to DEBUG 
     logger.setLevel(logging.DEBUG)
 
+    #Initializing cloudwatch client
     cloudwatch_client = boto3.client('cloudwatch')
 
     def process_logic(self, db_username, db_password):
@@ -28,13 +33,19 @@ class CloudWatchOps:
         This function is the initiating point for retrieving,transforming,publishing functions
 
         @params:
-        DB username
-        DB password 
+        DB username = username set for db access
+        DB password = password set for db access
         """
         instance_details = RDSOps().get_instance_statistics()
+        self.logger.info("Instance Details : {}".format(instance_details))
+
         rds_metrics = self.process_for_rds_metrics(
             instance_details, db_username, db_password)
+        self.logger.info("RDS Metrics : {}".format(rds_metrics))
+
         metric_to_publish = self.prepare_metrics_to_publish(rds_metrics,source_type='RDS')
+        self.logger.info("Metrics to publish : {}".format(metric_to_publish))
+
         self.publish_metrics(metric_to_publish,source_type='RDS_Percentage')
 
         self.get_write_throughput(instance_details)
@@ -46,9 +57,10 @@ class CloudWatchOps:
         @params:
         Instance-identifier : unique udentifier for db instances
         """
+        self.logger.info("Processing metrics for write-throughput")
+
         for instance_detail in dbinstanceidentifierlist:
             N = 1
-            print("instance detail : {}".format(instance_detail))
             response = self.cloudwatch_client.get_metric_statistics(
                 Namespace='AWS/RDS',
                 MetricName='WriteThroughput',
@@ -73,20 +85,27 @@ class CloudWatchOps:
 
         @params:
         instance_details_list : List of details such as storage_capacity,name,endpoint
-        DB_name
-        DB_password
+        DB_name : username for db access
+        DB_password : password for db access
+
+        @returns:
+        metrics_list : list of auto-increment tables and values
         """
         metrics_list = []
         for instance_detail in instance_details_list:
-            if(instance_detail[Constants.INSTANCE_NAME] == 'athenasvideo'):
+            #used for filtering out instances where lambda does not have permissions for access
+            #this can be replaced with the db name which doesnn't need to be accessed or doesn't grant access
+            if(instance_detail[Constants.INSTANCE_NAME] == 'some-db-with-no-access'): 
                 self.logger.info("Does not have access to this DB")
             else:
+                self.logger.info("Processing metrics for auto-increment")
                 db_connection = self.db_connection(
                     instance_detail[Constants.DB_HOST], db_username, db_password)
                 sql_query = Constants.AUTO_INCREMENT_QUERY
                 results = self.db_operations(
                     db_connection, sql_query, operation='Select')
-                metrics_list.append(results)
+                metrics_list.append(results)                
+        self.logger.info("Auto-increment list : {}".format(metrics_list))
         return metrics_list
 
     def prepare_metrics_to_publish(self,metrics,source_type):
@@ -97,8 +116,11 @@ class CloudWatchOps:
         metrics : Acutal metrics data
         source_type : Service from where metrics was obtained
 
+        @returns:
+        percentage of auto-increment consumed
         """
         if(source_type == 'RDS'):
+            percent_auto_increment_consumed = 0
             total_auto_increment = 0
             auto_increment_consumed = 0
             for metrics_list in metrics:
@@ -107,7 +129,9 @@ class CloudWatchOps:
                     self.logger.info("DB Host Metrics : {}".format(db_host_metric))
                     total_auto_increment = total_auto_increment + db_host_metric[6]
                     auto_increment_consumed = auto_increment_consumed + db_host_metric[7]
-        return ((float(auto_increment_consumed)/float(total_auto_increment))*100)
+        percent_auto_increment_consumed = ((float(auto_increment_consumed)/float(total_auto_increment))*100)
+        self.logger.info("Percentage auto-increment consumed : {}".format(percent_auto_increment_consumed))
+        return percent_auto_increment_consumed
 
     def prepare_write_throughput_to_publish(self,metrics,instance_name,storage):
         """
@@ -128,6 +152,7 @@ class CloudWatchOps:
             total_bytes_consumed_per_hour = avg_bytes_per_sec_per_hour * total_hours
             time_to_disk_full_in_hrs = float((float(storage) * 1000000000) / total_bytes_consumed_per_hour)
             time_to_disk_full_in_days = float(time_to_disk_full_in_hrs / 24)
+        self.logger.info("Time to disk full in days : {}".format(time_to_disk_full_in_days))
         self.publish_time_metrics(instance_name,time_to_disk_full_in_days)
 
     def publish_metrics(self,metric_to_publish,source_type):
@@ -155,11 +180,15 @@ class CloudWatchOps:
                         ],
                         Namespace='RDS'
                     )
-            print(response)
+            self.logger.info("Response for auto-increment published : {}".format(response))
 
     def publish_time_metrics(self,instance_name,metrics):
         """
-        This function is used for publishing time metrics        
+        This function is used for publishing time metrics
+
+        @params:
+        instance_name : name of the instance for which metrics are gathered
+        metrics : actual metrics to publish        
         """
         response = self.cloudwatch_client.put_metric_data(
                         MetricData=[
@@ -177,22 +206,43 @@ class CloudWatchOps:
                         ],
                         Namespace='RDS'
                     )
-        print(response)
+        self.logger.info("Response for time-to-disk full : {}".format(response))
 
 
     def db_connection(self, db_host, db_username, db_password):
+        """
+        This function is used for setting up db connection using pymysql
+
+        @params:
+        db_host : host-address of db
+        db_username : username for db access
+        db_password : password for db access
+
+        @returns:
+        A connection object after initializing connection
+        """
         return pymysql.connect(db_host, user=db_username, passwd=db_password, connect_timeout=5)
 
     def db_operations(self, db_connection, sql_query, operation):
+        """
+        This fucntion is used for performing any db related operations
+
+        @params:
+        db_connection : db connection object as to which db to execute query on
+        sql_query : sql query to perform
+        operation : type of operation select, execute, write, fetch, insert etc 
+        """
         try:
             # prepare a cursor object using cursor() method
             cursor = db_connection.cursor()
             if(operation == 'Select'):
                 cursor.execute(sql_query)
                 db_connection.commit()
+                self.logger.info("Successfully executed select query : {}".format(sql_query))
                 return list(cursor)
             elif(operation == 'Execute'):
                 cursor.execute(sql_query)
+                self.logger.info("Successfully executed execute query : {}".format(sql_query))
                 db_connection.commit()
         except (Exception, AttributeError) as err:
             self.logger.error("Error : {}".format(err))

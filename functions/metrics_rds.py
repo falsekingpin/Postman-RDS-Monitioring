@@ -1,3 +1,7 @@
+# -*- coding: utf-8 -*-
+__author__ = "Akshay Nar"
+
+#Importing dependencies
 import boto3
 import logging
 from constants import Constants

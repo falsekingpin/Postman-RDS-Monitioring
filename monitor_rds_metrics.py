@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 __author__ = "Akshay Nar"
 
+#Importing dependencies
 import sys
 import json
 import logging
 import pymysql
 import os
 import boto3
-from base64 import b64decode
 import metrics_cloudwatch
 
 logging.basicConfig(filename="monitor_rds_metrics.log", 
@@ -30,9 +30,11 @@ def monitor_rds(event, context):
     context = It uses this paramter to provide runtime information
 
     @returns:
-    Status Code and Status Message 
+    Status Code = numeric code
+    Status Message = message if function executed successfully
     """
 
+    #initializing db credentials
     db_username = os.getenv('DB_USERNAME')
     db_password = os.getenv('DB_PASSWORD')
 
@@ -42,9 +44,15 @@ def monitor_rds(event, context):
         metrics_cloudwatch.CloudWatchOps().process_logic(db_username,db_password)
         logger.info("Completed the process successfully")
     except Exception as e:
+        #Logging exceptions
         logger.error("ERROR: {}".format(e))
         sys.exit()
-    logger.info("SUCCESS: Connection to RDS mysql instance succeeded")
+        return {
+            'statusCode': 400,
+            'body': json.dumps('Function encountered some error')
+        }
+        
+    logger.info("Published metrics to cloudwatch successfully")
 
     return {
         'statusCode': 200,
